@@ -390,9 +390,9 @@ One may use numba or C strings to write CUDA kernels.
 |Group|Name|Result|Rank|
 |-----|----|------|----|
 |default|pisarevsky_vadim|0.0806|1|
+|default|lobanova_elizaveta|0.0838|4|
 |**FAST**|**FAST**|**0.0879**|**-**|
 |default|chekmaryov_petr|0.0882|3|
-|default|lobanova_elizaveta|0.1391|4|
 |default|smirnov_denis|0.1632|2|
 |default|znamenskiy_mikhail|0.1723|7|
 |default|pigasin_dmitry|0.3863|6|
@@ -443,8 +443,8 @@ One may use numba or C strings to write CUDA kernels.
 ## default
 |Group|Name|Passed|Score|
 |-----|----|------|-----|
-|default|chekmaryov_petr|1/7|61|
-|default|lobanova_elizaveta|1/7|59|
+|default|chekmaryov_petr|1/7|60|
+|default|lobanova_elizaveta|1/7|60|
 |default|lukicheva_polina|0/7|0|
 |default|pigasin_dmitry|1/7|54|
 |default|pisarevsky_vadim|2/7|127|
