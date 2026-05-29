@@ -7,28 +7,32 @@
 
 #include "naive_gemm_cuda.h"
 
-__global__ void vecNaiveGemm(float* A, float* B, float* C, size_t n) {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx < n * n) {
-        int x = idx % n;
-        int y = idx / n;
-        float sum = 0.f;
-        for (int i = 0; i < n; i++) {
-            sum += A[y * n + i] * B[i * n + x];
+__global__ void vecNaiveGemm4(const float* A, const float* B, float* C, int n) {
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+    if (x * 4 < n && y < n) {
+        const float4* B4 = reinterpret_cast<const float4*>(B);
+        float4* C4 = reinterpret_cast<float4*>(C);
+        float4 sum = make_float4(0.f, 0.f, 0.f, 0.f);
+
+        for (int i = 0; i < n; ++i) {
+            float a = A[y * n + i];
+            float4 b = B4[(i * n / 4) + x]; 
+
+            sum.x += a * b.x;
+            sum.y += a * b.y;
+            sum.z += a * b.z;
+            sum.w += a * b.w;
         }
-        C[idx] = sum;
+
+        C4[(y * n / 4) + x] = sum;
     }
 }
 
 std::vector<float> NaiveGemmCUDA(const std::vector<float>& a,
                                  const std::vector<float>& b,
                                  int n) {
-    std::vector<float> c(n * n);
-
-    const float* aptr = a.data();
-    const float* bptr = b.data();
-    float* cptr = c.data();
-
     float* A = nullptr;
     float* B = nullptr;
     float* C = nullptr;
@@ -38,14 +42,18 @@ std::vector<float> NaiveGemmCUDA(const std::vector<float>& a,
     cudaMalloc(&B, bytes);
     cudaMalloc(&C, bytes);
     
-    cudaMemcpy(A, aptr, bytes, cudaMemcpyHostToDevice);
-    cudaMemcpy(B, bptr, bytes, cudaMemcpyHostToDevice);
-    
-    size_t threads = 256;
-    size_t blocks = (n * n + threads - 1) / threads;
-    vecNaiveGemm<<<blocks, threads>>>(A, B, C, n);
+    cudaMemcpy(A, a.data(), bytes, cudaMemcpyHostToDevice);
+    cudaMemcpy(B, b.data(), bytes, cudaMemcpyHostToDevice);
 
-    cudaMemcpy(cptr, C, bytes, cudaMemcpyDeviceToHost);
+    dim3 threads(32, 8);
+    dim3 blocks(
+        (n / 4 + threads.x - 1) / threads.x,
+        (n + threads.y - 1) / threads/*  */.y
+    );
+    vecNaiveGemm4<<<blocks, threads>>>(A, B, C, n);
+
+    std::vector<float> c(n * n);
+    cudaMemcpy(c.data(), C, bytes, cudaMemcpyDeviceToHost);
 
     cudaFree(A);
     cudaFree(B);
@@ -106,7 +114,7 @@ int main() {
         time_list.push_back(duration.count());
     }
     double time = *std::min_element(time_list.begin(), time_list.end());
-    printf("time = %.2f\n", time);
+    printf("time = %.4f\n", time);
 
     return 0;
 }
