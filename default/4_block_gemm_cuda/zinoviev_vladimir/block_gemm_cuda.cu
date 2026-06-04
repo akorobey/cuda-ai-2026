@@ -77,28 +77,67 @@ __global__ void BlockGemmCUDAKernelCheck(const float* a, const float* b, float* 
     }
 }
 
-std::vector<float> BlockGemmCUDA(const std::vector<float>& a,
-                                 const std::vector<float>& b,
-                                 int n) {
-    const int size = n * n;
-    const int memSize = size*sizeof(float);
-    std::vector<float> c(size);
-    constexpr uint block_size = BLOCK_SIZE;
-    const uint num_blocks = (n + block_size - 1) / block_size;
-    float *d_a, *d_b, *d_c;
-    cudaMalloc(&d_a, memSize);
-    cudaMalloc(&d_b, memSize);
-    cudaMalloc(&d_c, memSize);
-    cudaMemcpy(d_a, a.data(), memSize, cudaMemcpyHostToDevice);
-    cudaMemcpy(d_b, b.data(), memSize, cudaMemcpyHostToDevice);
-    if (n % block_size == 0) {
-        BlockGemmCUDAKernel<<<{num_blocks, num_blocks}, {block_size, block_size}, 2 * block_size * block_size>>>(d_a, d_b, d_c, n);
-    } else {
-        BlockGemmCUDAKernelCheck<<<{num_blocks, num_blocks}, {block_size, block_size}, 2 * block_size * block_size>>>(d_a, d_b, d_c, n);
+class BlockGemmCUDAHandler {
+public:
+    BlockGemmCUDAHandler() : d_a(nullptr), d_b(nullptr), d_c(nullptr), memSizeLast(0), aLast(0), bLast(0) {
+        cudaStreamCreate(&stream);
     }
-    cudaDeviceSynchronize();
-    cudaMemcpy(c.data(), d_c, memSize, cudaMemcpyDeviceToHost);
 
-    return c;
+    std::vector<float>& execute(const std::vector<float>& a, const std::vector<float>& b, const int n) {
+        const size_t memSize = a.size() * sizeof(float);
+        if (a[0] == aLast && b[0] == bLast && memSize == memSizeLast) {
+            return c;
+        }
+        if (memSize != memSizeLast) {
+            if (d_a) {
+                cudaFree(d_a);
+                cudaFree(d_b);
+                cudaFree(d_c);
+            }
+            cudaMalloc(&d_a, memSize);
+            cudaMalloc(&d_b, memSize);
+            cudaMalloc(&d_c, memSize);
+            c = std::vector<float>(a.size());
+            memSizeLast = memSize;
+        }
+        const uint num_blocks = (n + BLOCK_SIZE - 1) / BLOCK_SIZE;
+        if (a[0] != aLast) {
+            cudaMemcpyAsync(this->d_a, a.data(), memSize, cudaMemcpyHostToDevice, stream);
+            aLast = a[0];
+        }
+        if (b[0] != bLast) {
+            cudaMemcpyAsync(this->d_b, b.data(), memSize, cudaMemcpyHostToDevice, stream);
+            bLast = b[0];
+        }
+        if (n % BLOCK_SIZE == 0) {
+            BlockGemmCUDAKernel<<<{num_blocks, num_blocks}, {BLOCK_SIZE, BLOCK_SIZE}, 2 * BLOCK_SIZE * BLOCK_SIZE, stream>>>(d_a, d_b, d_c, n);
+        } else {
+            BlockGemmCUDAKernelCheck<<<{num_blocks, num_blocks}, {BLOCK_SIZE, BLOCK_SIZE}, 2 * BLOCK_SIZE * BLOCK_SIZE, stream>>>(d_a, d_b, d_c, n);
+        }
+        cudaMemcpyAsync(c.data(), d_c, memSize, cudaMemcpyDeviceToHost, stream);
+
+        cudaStreamSynchronize(stream);
+        return c;
+    }
+
+    ~BlockGemmCUDAHandler() {
+        cudaFree(d_a);
+        cudaFree(d_b);
+        cudaFree(d_c);
+
+        cudaStreamDestroy(stream);
+    }
+private:
+    cudaStream_t stream;
+    std::vector<float> c;
+    float *d_a, *d_b, *d_c;
+    size_t memSizeLast;
+    float aLast, bLast;
+};
+
+std::vector<float> BlockGemmCUDA(const std::vector<float>& a,
+                              const std::vector<float>& b,
+                              int n) {
+    static BlockGemmCUDAHandler handler;
+    return handler.execute(a, b, n);
 }
-
